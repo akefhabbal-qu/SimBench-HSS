@@ -1,0 +1,9 @@
+title: RL Training Workflow
+
+Start -> Request: "File write request"
+Request -> State: "Get state"
+State -> Action: "DQN/DDQN selects tier"
+Action -> Execute: "Write to selected tier"
+Execute -> Reward: "Calculate reward"
+Reward -> Train: "Train model (every 20 steps)"
+Train -> Request: "Next request"

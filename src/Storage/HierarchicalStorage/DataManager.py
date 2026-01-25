@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from ..StorageNode import StorageNode
 from ..storage_types import StorageNodeType, DataObject
 from ..exceptions import (
@@ -13,9 +13,11 @@ from utils.logger import logger
 from utils.Utility import format_data_size
 from .NodeManager import NodeManager
 from .CapacityManager import CapacityManager
+from .LFUFrequencyTracker import LFUFrequencyTracker
 
 class DataManager:
-    def __init__(self, node_manager: NodeManager, capacity_manager: CapacityManager, config: dict):
+    def __init__(self, node_manager: NodeManager, capacity_manager: CapacityManager, config: dict, 
+                 lfu_time_window: Optional[int] = None, enable_lfu_tracking: bool = True):
         self.config = config
         
         self.node_manager = node_manager
@@ -29,6 +31,11 @@ class DataManager:
         self.__num_unsuccessful_write = 0
         self.__num_successful_read = 0
         self.__num_unsuccessful_read = 0
+        
+        # Initialize LFU frequency tracker for placement algorithm
+        self.enable_lfu_tracking = enable_lfu_tracking
+        time_window = lfu_time_window if lfu_time_window is not None else config.get("lfu_time_window", 1000)
+        self.lfu_tracker = LFUFrequencyTracker(time_window=time_window) if enable_lfu_tracking else None
 
     def has_data(self, data_id: str) -> bool:
         return data_id in self.data_objects and not self.data_objects.get(data_id).is_file_deleted()
@@ -49,6 +56,10 @@ class DataManager:
     def _overwrite_existing_data(self, node_type: StorageNodeType, data_object: DataObject, timestamp: int) -> float:
         old_data = self.data_objects[data_object.id]
         old_data.increment_write_access(timestamp)
+        
+        # Record access for LFU frequency tracking
+        if self.enable_lfu_tracking and self.lfu_tracker:
+            self.lfu_tracker.record_access(data_object.id, timestamp, "write")
 
         size_diff = data_object.size - old_data.size
         num_replica = self.config["num_data_replica"]
@@ -91,6 +102,10 @@ class DataManager:
             self.data_objects[data_object.id].mark_written()
         else:
             data_object.increment_write_access(timestamp)
+        
+        # Record access for LFU frequency tracking
+        if self.enable_lfu_tracking and self.lfu_tracker:
+            self.lfu_tracker.record_access(data_object.id, timestamp, "write")
 
         num_replica = self.config["num_data_replica"]
         required_capacity = num_replica * data_object.size
@@ -146,6 +161,10 @@ class DataManager:
             raise DataNotFoundException(f"Data {data_id} is not found for reading")
 
         self.data_objects[data_id].increment_read_access(timestamp)
+        
+        # Record access for LFU frequency tracking
+        if self.enable_lfu_tracking and self.lfu_tracker:
+            self.lfu_tracker.record_access(data_id, timestamp, "read")
 
         node_ids = self.data_to_nodes.get(data_id)
         self.data_access_count[data_id] += 1
@@ -237,6 +256,10 @@ class DataManager:
         self.data_access_count.clear()
         self.__num_successful_write = 0
         self.__num_unsuccessful_write = 0
+        
+        # Reset LFU frequency tracker
+        if self.enable_lfu_tracking and self.lfu_tracker:
+            self.lfu_tracker.reset()
         
         logger.info("DataManager: Reset all data objects and access counts.")
 

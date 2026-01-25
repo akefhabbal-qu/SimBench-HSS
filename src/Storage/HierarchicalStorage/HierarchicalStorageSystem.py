@@ -1,3 +1,4 @@
+from typing import Optional
 from ..storage_types import StorageNodeType, DataObject
 from ..storage_config import HIERARCHICAL_STORAGE_CONFIG
 from .NodeManager import NodeManager
@@ -8,13 +9,20 @@ from utils.Utility import format_data_size
 from ..MetricsCalculator import MetricsCalculator
 
 class HierarchicalStorageSystem:
-    def __init__(self):
+    def __init__(self, enable_lfu_tracking: bool = True, lfu_time_window: Optional[int] = None):
         self.config = HIERARCHICAL_STORAGE_CONFIG
         self.node_manager = NodeManager(self.config)
         self.capacity_manager = CapacityManager(self.node_manager)
-        self.data_manager = DataManager(self.node_manager, self.capacity_manager, HIERARCHICAL_STORAGE_CONFIG)
+        self.data_manager = DataManager(
+            self.node_manager, 
+            self.capacity_manager, 
+            HIERARCHICAL_STORAGE_CONFIG,
+            lfu_time_window=lfu_time_window,
+            enable_lfu_tracking=enable_lfu_tracking
+        )
         
         self.metrics_calculator = None
+        self._current_timestamp = 0  # Track current simulation timestamp
 
     def initialize_metrics_calculator(self, metrics_calculator: MetricsCalculator):
         self.metrics_calculator = metrics_calculator
@@ -56,9 +64,11 @@ class HierarchicalStorageSystem:
         return self.data_manager.has_data(data_id)
 
     def write_to_node(self, node_type: StorageNodeType, data, timestamp: int):
+        self._current_timestamp = timestamp  # Update current timestamp
         return self.data_manager.write_to_node(node_type, data, timestamp)
 
     def read_data(self, data_id: str, timestamp: int):
+        self._current_timestamp = timestamp  # Update current timestamp
         return self.data_manager.read_data(data_id, timestamp)
 
     def delete_data(self, data_id: str, timestamp: int):
@@ -183,6 +193,23 @@ class HierarchicalStorageSystem:
 
     def generate_data(self, data_id: str, size: int) -> DataObject:
         return self.data_manager.generate_data(data_id, size)
+    
+    def get_access_frequency(self, data_id: str, current_timestamp: int = None) -> int:
+        """
+        Get the access frequency of a data object within the LFU time window.
+        
+        Args:
+            data_id (str): The ID of the data object
+            current_timestamp (int, optional): The current simulation timestamp. 
+                                             If None, uses the system's current timestamp.
+            
+        Returns:
+            int: The number of accesses within the time window, or 0 if not tracked
+        """
+        if self.data_manager.enable_lfu_tracking and self.data_manager.lfu_tracker:
+            timestamp = current_timestamp if current_timestamp is not None else self._current_timestamp
+            return self.data_manager.lfu_tracker.get_access_frequency(data_id, timestamp)
+        return 0
 
 
 # if __name__ == "__main__":
